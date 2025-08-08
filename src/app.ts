@@ -7,6 +7,11 @@ import compression from "compression";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 
+// Import models to register schemas
+import "./models/Song";
+import "./models/Artist";
+import "./models/User";
+
 // Import routes
 import songRoutes from "./routes/songs";
 import artistRoutes from "./routes/artists";
@@ -19,31 +24,106 @@ import { errorHandler } from "./middleware/errorHandler";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/music-app";
+
+// Trust proxy for Vercel deployment
+app.set("trust proxy", 1);
 
 // Rate limiting
 // const limiter = rateLimit({
 //   windowMs: 15 * 60 * 1000, // 15 minutes
-//   max: 100, // limit each IP to 100 requests per windowMs
-//   message: "Too many requests from this IP, please try again later.",
+//   max: 100,
+//   message: {
+//     success: false,
+//     message: "Too many requests from this IP, please try again later.",
+//   },
+//   standardHeaders: true,
+//   legacyHeaders: false,
 // });
 
 // Middleware
-app.use(helmet());
 app.use(
-  cors({
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
-    credentials: true,
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
   })
 );
+
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || "*",
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  })
+);
+
 app.use(compression());
-app.use(morgan("combined"));
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 // app.use(limiter);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Health check endpoint
+// Global connection promise to avoid multiple connections
+let cachedConnection: typeof mongoose | null = null;
+
+// Database connection optimized for serverless
+const connectDB = async (): Promise<typeof mongoose> => {
+  if (cachedConnection && mongoose.connections[0].readyState === 1) {
+    console.log("📦 Using cached MongoDB connection");
+    return cachedConnection;
+  }
+
+  try {
+    // Disconnect any existing connections
+    if (mongoose.connections[0].readyState !== 0) {
+      await mongoose.disconnect();
+    }
+
+    const opts = {
+      bufferCommands: false, // Disable mongoose buffering
+      bufferMaxEntries: 0, // Disable mongoose buffering
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      family: 4, // Use IPv4, skip trying IPv6
+      maxIdleTimeMS: 30000,
+      minPoolSize: 0,
+    };
+
+    console.log("🔌 Connecting to MongoDB...");
+    cachedConnection = await mongoose.connect(MONGODB_URI, opts);
+
+    console.log("📦 MongoDB connected successfully");
+    console.log(`🗃️  Database: ${mongoose.connection.name}`);
+    console.log("📋 Registered Models:", Object.keys(mongoose.models));
+
+    return cachedConnection;
+  } catch (error) {
+    console.error("❌ MongoDB connection error:", (error as Error).message);
+    cachedConnection = null;
+    throw error;
+  }
+};
+
+// Database connection middleware - ensures connection before each request
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    console.error("Database connection failed:", error);
+    return res.status(503).json({
+      success: false,
+      message: "Database service temporarily unavailable",
+      error:
+        process.env.NODE_ENV === "development" ? (error as Error).message : undefined,
+    });
+  }
+});
+
+// Health check endpoints
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
@@ -54,12 +134,43 @@ app.get("/", (req, res) => {
   });
 });
 
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "OK",
-    message: "Music App API Server is running",
-    timestamp: new Date().toISOString(),
-  });
+app.get("/api/health", async (req, res) => {
+  try {
+    const dbState = mongoose.connections[0].readyState;
+    const dbStatusMap: Record<number, string> = {
+      0: "disconnected",
+      1: "connected",
+      2: "connecting",
+      3: "disconnecting",
+    };
+    const dbStatus = dbStatusMap[dbState] ?? "unknown";
+
+    // Test database connectivity
+    if (dbState === 1 && mongoose.connection.db) {
+      await mongoose.connection.db.admin().ping();
+    }
+
+    res.status(200).json({
+      success: true,
+      status: "OK",
+      message: "Music App API Server is running",
+      timestamp: new Date().toISOString(),
+      database: {
+        status: dbStatus,
+        name: mongoose.connection.name || "unknown",
+        models: Object.keys(mongoose.models),
+      },
+    });
+  } catch (error) {
+    res.status(503).json({
+      success: false,
+      status: "SERVICE_UNAVAILABLE",
+      message: "Database health check failed",
+      timestamp: new Date().toISOString(),
+      error:
+        process.env.NODE_ENV === "development" ? (error as Error).message : undefined,
+    });
+  }
 });
 
 // API routes
@@ -75,49 +186,8 @@ app.use((req, res) => {
   res.status(404).json({
     success: false,
     message: "Endpoint not found",
+    path: req.path,
   });
-});
-
-// Database connection
-const clientOptions = {
-  serverApi: { version: "1" as "1", strict: true, deprecationErrors: true },
-};
-
-const connectDB = async () => {
-  try {
-    await mongoose.connect(MONGODB_URI, clientOptions);
-    if (mongoose.connection.db) {
-      await mongoose.connection.db.admin().command({ ping: 1 });
-      console.log("📦 MongoDB connected successfully");
-      return true;
-    } else {
-      throw new Error("MongoDB connection is undefined");
-    }
-  } catch (error) {
-    console.error("❌ MongoDB connection error:", (error as Error).message);
-    console.log("⚠️  Server will start without database connection");
-    console.log("💡 Please install and start MongoDB to enable full functionality");
-    return false;
-  }
-};
-
-// Start server
-const startServer = async () => {
-  const dbConnected = await connectDB();
-
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌐 Health check: http://localhost:${PORT}/health`);
-    console.log(`📚 API Base URL: http://localhost:${PORT}/api`);
-    if (!dbConnected) {
-      console.log("⚠️  Database features are disabled - install MongoDB to enable");
-    }
-  });
-};
-
-startServer().catch((error) => {
-  console.error("❌ Failed to start server:", error);
-  process.exit(1);
 });
 
 export default app;
