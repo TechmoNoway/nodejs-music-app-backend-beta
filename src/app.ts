@@ -79,21 +79,14 @@ const connectDB = async (): Promise<typeof mongoose> => {
       await mongoose.disconnect();
     }
 
-    const opts = {
-      bufferCommands: false, // Disable mongoose buffering
-      bufferMaxEntries: 0, // Disable mongoose buffering
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-      family: 4, // Use IPv4, skip trying IPv6
-      maxIdleTimeMS: 30000,
-      minPoolSize: 0,
+    const clientOptions = {
+      serverApi: { version: "1" as const, strict: true, deprecationErrors: true },
     };
 
     console.log("🔌 Connecting to MongoDB...");
-    cachedConnection = await mongoose.connect(MONGODB_URI, opts);
+    cachedConnection = await mongoose.connect(MONGODB_URI, clientOptions);
+
+    await mongoose.connection.db?.admin().ping();
 
     console.log("📦 MongoDB connected successfully");
     console.log(`🗃️  Database: ${mongoose.connection.name}`);
