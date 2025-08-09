@@ -23,9 +23,9 @@ import { errorHandler } from "./middleware/errorHandler";
 dotenv.config();
 
 const app = express();
-// const MONGODB_URI = process.env.MONGODB_URI || "mongodb://0.0.0.0:27017/music-app";
-const MONGODB_URI =
-  "mongodb+srv://nguyentriky0406:mO7rXWrWKFZz7wnw@cluster0.f0fg0.mongodb.net/music-app?retryWrites=true&w=majority&appName=Cluster0";
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb://0.0.0.0:27017/music-app";
+// const MONGODB_URI =
+//   "mongodb+srv://nguyentriky0406:mO7rXWrWKFZz7wnw@cluster0.f0fg0.mongodb.net/music-app?retryWrites=true&w=majority&appName=Cluster0" ;
 
 // Trust proxy for Vercel deployment
 app.set("trust proxy", 1);
