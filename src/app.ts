@@ -23,7 +23,7 @@ import { errorHandler } from "./middleware/errorHandler";
 dotenv.config();
 
 const app = express();
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = process.env.MONGODB_URI as string;
 // || "mongodb://0.0.0.0:27017/music-app";
 
 // Trust proxy for Vercel deployment
