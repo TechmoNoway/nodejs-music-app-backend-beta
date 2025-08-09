@@ -5,7 +5,6 @@ import dotenv from "dotenv";
 import helmet from "helmet";
 import compression from "compression";
 import morgan from "morgan";
-import rateLimit from "express-rate-limit";
 
 // Import models to register schemas
 import "./models/Song";
@@ -24,22 +23,11 @@ import { errorHandler } from "./middleware/errorHandler";
 dotenv.config();
 
 const app = express();
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/music-app";
+const MONGODB_URI = process.env.MONGODB_URI;
+// || "mongodb://0.0.0.0:27017/music-app";
 
 // Trust proxy for Vercel deployment
 app.set("trust proxy", 1);
-
-// Rate limiting
-// const limiter = rateLimit({
-//   windowMs: 15 * 60 * 1000, // 15 minutes
-//   max: 100,
-//   message: {
-//     success: false,
-//     message: "Too many requests from this IP, please try again later.",
-//   },
-//   standardHeaders: true,
-//   legacyHeaders: false,
-// });
 
 // Middleware
 app.use(
@@ -59,9 +47,6 @@ app.use(
 
 app.use(compression());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
-// app.use(limiter);
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Global connection promise to avoid multiple connections
 let cachedConnection: typeof mongoose | null = null;
